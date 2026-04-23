@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+import ssl
+import certifi
 
 load_dotenv()
 
@@ -16,7 +19,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    http_client=httpx.Client(verify=False)
+)
 
 SYSTEM_PROMPT = """אתה "Camp Buddy" - מדריך קמפינג וטיולים מנוסה, חברותי ומצחיק שעוזר לאנשים לתכנן טיולים מושלמים בישראל ובעולם.
 
@@ -47,23 +53,27 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    if req.sessionId not in sessions:
-        sessions[req.sessionId] = []
+    try:
+        if req.sessionId not in sessions:
+            sessions[req.sessionId] = []
 
-    sessions[req.sessionId].append({"role": "user", "content": req.message})
+        sessions[req.sessionId].append({"role": "user", "content": req.message})
 
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            *sessions[req.sessionId],
-        ],
-    )
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                *sessions[req.sessionId],
+            ],
+        )
 
-    reply = completion.choices[0].message.content
-    sessions[req.sessionId].append({"role": "assistant", "content": reply})
+        reply = completion.choices[0].message.content
+        sessions[req.sessionId].append({"role": "assistant", "content": reply})
 
-    return {"reply": reply}
+        return {"reply": reply}
+    except Exception as e:
+        print("ERROR:", str(e))
+        raise
 
 
 if __name__ == "__main__":
